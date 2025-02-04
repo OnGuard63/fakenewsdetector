@@ -1,0 +1,129 @@
+import requests
+from bs4 import BeautifulSoup
+import re
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+from nltk.corpus import stopwords
+from nltk.stem import WordNetLemmatizer
+import time
+
+# Function to download NLTK resources (if not already available)
+def download_nltk_resources():
+    import nltk
+    try:
+        nltk.data.find('corpora/stopwords')
+    except LookupError:
+        print("Downloading NLTK stopwords...")
+        nltk.download('stopwords')
+        nltk.download('wordnet')
+
+# Custom stopwords list (fallback if NLTK download fails or if you prefer not to use NLTK)
+CUSTOM_STOPWORDS = {
+    "i", "me", "my", "myself", "we", "our", "ours", "ourselves", "you", "your", "yours", "yourself", "yourselves",
+    "he", "him", "his", "himself", "she", "her", "hers", "herself", "it", "its", "itself", "they", "them", "their",
+    "theirs", "themselves", "what", "which", "who", "whom", "this", "that", "these", "those", "am", "is", "are",
+    "was", "were", "be", "been", "being", "have", "has", "had", "having", "do", "does", "did", "doing", "a", "an", "the",
+    "and", "but", "if", "or", "because", "as", "until", "while", "of", "at", "by", "for", "with", "about", "against",
+    "between", "into", "through", "during", "before", "after", "above", "below", "to", "from", "up", "down", "in", "out",
+    "on", "off", "over", "under", "again", "further", "then", "once", "here", "there", "when", "where", "why", "how",
+    "all", "any", "both", "each", "few", "more", "most", "other", "some", "such", "no", "nor", "not", "only", "own",
+    "same", "so", "than", "too", "very", "s", "t", "can", "will", "just", "don", "should", "now"
+}
+
+# Function to extract keywords from the user's input
+def extract_keywords(text, use_nltk=True):
+    # If using NLTK stopwords, ensure resources are downloaded
+    if use_nltk:
+        download_nltk_resources()
+        stop_words = set(stopwords.words('english'))
+    else:
+        stop_words = CUSTOM_STOPWORDS
+
+    lemmatizer = WordNetLemmatizer()
+
+    # Remove non-alphanumeric characters and split into words
+    words = re.findall(r'\b\w+\b', text.lower())
+
+    # Remove stopwords and lemmatize
+    filtered_words = [lemmatizer.lemmatize(word) for word in words if word not in stop_words]
+
+    return filtered_words
+
+# Function to fetch recent headlines from a given news site, with retries
+def fetch_news_headlines(url, site_name, tags, headers=None, retries=3):
+    for attempt in range(retries):
+        try:
+            response = requests.get(url, headers=headers, timeout=10)
+            response.raise_for_status()  # Handle 404/500 errors
+            soup = BeautifulSoup(response.content, 'html.parser')
+            headlines = soup.find_all(tags)
+            return [(headline.get_text(strip=True).lower(), site_name) for headline in headlines if headline.get_text(strip=True)]
+        except requests.exceptions.RequestException as e:
+            if attempt < retries - 1:
+                print(f"Retrying ({attempt + 1}/{retries}) for {site_name}...")
+                time.sleep(2)  # Add a small delay before retry
+            else:
+                print(f"Failed to fetch {url} from {site_name} after {retries} attempts.")
+                return []
+
+# Function to check if most of the keywords from user input appear in a headline
+def check_headline_for_keywords(user_keywords, headlines, threshold=0.3):  # Lowered threshold for leniency
+    if not headlines:
+        return []
+
+    # Combine user keywords into a single string for vectorization
+    user_input_str = ' '.join(user_keywords)
+
+    # Create a TF-IDF vectorizer and compute the cosine similarity
+    vectorizer = TfidfVectorizer(stop_words='english')
+    all_texts = [user_input_str] + [headline[0] for headline in headlines]
+    tfidf_matrix = vectorizer.fit_transform(all_texts)
+
+    # Calculate cosine similarities
+    cosine_similarities = cosine_similarity(tfidf_matrix[0:1], tfidf_matrix[1:]).flatten()
+
+    matched_headlines = []
+    for i, score in enumerate(cosine_similarities):
+        if score > threshold:  # If the similarity score is above the threshold
+            matched_headlines.append(f"Headline match found from {headlines[i][1]}: {headlines[i][0]}")
+
+    return matched_headlines  # Return the list of matched headlines
+
+# Main function to run the fake news detection process
+def main():
+    # Step 1: Get user input
+    user_input = input("Enter a news event or headline to check: ").strip()
+
+    # Step 2: Extract keywords from the user's input
+    user_keywords = extract_keywords(user_input, use_nltk=True)  # Set use_nltk=False to use custom stopwords
+
+    # Step 3: Fetch headlines from various major news agencies
+    news_sources = {
+        "BBC": {"url": "https://www.bbc.co.uk", "tags": ['h3', 'h2']},
+        "The Guardian": {"url": "https://www.theguardian.com/observer", "tags": ['h3']},
+        "CNN": {"url": "https://www.cnn.com", "tags": ['h3', 'span']},
+        "Al Jazeera": {"url": "https://www.aljazeera.com", "tags": ['h3', 'h2', 'h1']},
+        "Associated Press": {"url": "https://www.apnews.com", "tags": ['h3', 'h2', 'a']},
+        "ABC News": {"url": "https://abcnews.go.com", "tags": ['h3', 'h2']},
+        "New York Times": {"url": "https://www.nytimes.com", "tags": ['h3', 'h2']},  # New York Times
+    }
+
+    all_headlines = []
+
+    # Fetch headlines for each source
+    for site_name, info in news_sources.items():
+        headlines = fetch_news_headlines(info['url'], site_name, info['tags'])
+        all_headlines.extend(headlines)
+
+    # Step 4: Check if most of the keywords appear in any headline
+    matched_headlines = check_headline_for_keywords(user_keywords, all_headlines)
+
+    # Step 5: Display the matched headlines or notify the user if no relevant articles are found
+    if matched_headlines:
+        for match in matched_headlines:
+            print(match)
+    else:
+        print("No relevant news articles found.")
+
+if __name__ == "__main__":
+    main()

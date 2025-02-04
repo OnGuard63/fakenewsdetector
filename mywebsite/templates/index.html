@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fake News Detector</title>
+</head>
+<body>
+    <h1>Fake News Detector</h1>
+    <form method="POST">
+        <label for="user_input">Enter a news event or headline:</label>
+        <input type="text" id="user_input" name="user_input" required>
+        <button type="submit">Check</button>
+    </form>
+
+    {% if matched_headlines %}
+        <h2>Matched Headlines:</h2>
+        <ul>
+            {% for headline in matched_headlines %}
+                <li>{{ headline }}</li>
+            {% endfor %}
+        </ul>
+    {% else %}
+        <p>No relevant news articles found.</p>
+    {% endif %}
+</body>
+</html>
